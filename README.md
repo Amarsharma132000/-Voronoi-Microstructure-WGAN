@@ -42,7 +42,7 @@ Design and implement a WGAN-GP to synthesize sharp, diverse Voronoi tessellation
 ![Dataset Samples](sample_dataset_grid.png)  
 *(9 random 64×64 Voronoi images from the loaded dataset.)*
 
-## 3. ⚙️ Training Infrastructure & Monitoring
+## 3.Training Infrastructure & Monitoring
 
 ### Problem Solved
 GANs are notoriously unstable. This project implements a custom training loop with specialized scheduling to ensure the Critic stays ahead of the Generator.
@@ -61,7 +61,7 @@ GANs are notoriously unstable. This project implements a custom training loop wi
 ![Training Evolution](voronoi_training_animation.gif)  
 *(Generated microstructures from Epoch 0 to 100; noise-to-structure transformation.)*
 
-## 4. 🔧 Technical Implementation & Optimization
+## 4. Technical Implementation & Optimization
 
 ### Programming Language
 Python 3.8+
@@ -86,7 +86,7 @@ Python 3.8+
 | β₁/β₂ (Adam) | 0.5 / 0.9 | Momentum for GANs |
 | GP Weight (λ) | 10 | Standard for WGAN-GP |
 
-## 5. 📊 Key Results & Performance
+## 5.Key Results & Performance
 - **Sample Output**: Synthesized 64×64 microstructures indistinguishable from ground truth Voronoi tessellations.
 - **Training Stability**: Critic loss converged stably without oscillation, providing a reliable metric for optimization.
 - **Efficiency**: High-performance pipeline capable of training on T4 GPUs within reasonable timeframes due to AMP optimizations.
@@ -97,7 +97,7 @@ Python 3.8+
 - Demonstrates mastery of advanced Generative AI optimization techniques.
 
 **Loss Convergence Plot** (Conceptual):  
-![Loss Curves](loss_curves.png)  
+![Loss Curves](image.png)  
 *(Critic loss (blue) stabilizes; Generator (orange) minimizes steadily.)*
 
 ## 6. 🚀 Technical Achievements
@@ -106,7 +106,7 @@ Python 3.8+
 - **Production Features**: Checkpointing, automated GIF generation, and modular code structure.
 - **Visualization**: Real-time tracking of grain boundary formation.
 
-## 📖 Usage
+## Usage
 
 ### Prerequisites
 - Google Colab (T4 GPU recommended) or Local CUDA Environment
