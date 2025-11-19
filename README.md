@@ -4,10 +4,10 @@
 
 A Wasserstein Generative Adversarial Network with Gradient Penalty (WGAN-GP) implementation for synthesizing high-fidelity Voronoi material microstructures using TensorFlow/Keras. This project leverages advanced optimization techniques—including Mixed Precision training and Two-Time-Scale Update Rules—to address "mode collapse" and generate scientifically accurate grain boundaries for computational material science.
 
-## 🎯 Objective
+## Objective
 Design and implement a WGAN-GP to synthesize sharp, diverse Voronoi tessellations mimicking microscopic material microstructures. By replacing traditional GAN losses with Wasserstein distance and gradient penalties, the model achieves stable training and superior sample quality over DCGAN baselines.
 
-## 1. 🏗️ Architecture & Model Design
+## 1. Architecture & Model Design
 
 ### Approach
 - **Generator**: Deep upsampling network (Latent Dim → 64×64) utilizing `UpSampling2D` and `Conv2D`. Deliberately excludes Batch Normalization to prevent artifacting in texture generation.
@@ -26,7 +26,7 @@ Design and implement a WGAN-GP to synthesize sharp, diverse Voronoi tessellation
 | **Generator** | (100,) | (64, 64, 1) | Dense(8192) → UpSample(4→8) → Conv(256) → ... → Tanh |
 | **Critic** | (64, 64, 1) | (1,) | Conv(64, stride=2) → LeakyReLU → ... → Dense(1) |
 
-## 2. 🔄 Data Pipeline & Preprocessing
+## 2. Data Pipeline & Preprocessing
 
 ### Approach
 - **Data Ingestion**: Automated pipeline handling H5 file parsing and stacking from compressed Voronoi datasets.
@@ -141,13 +141,4 @@ Python 3.8+
 - Modify `gp_weight` (Gradient Penalty weight) to tune training stability.
 - Change `z_noise_dim` to alter the latent space complexity.
 
----
 
-**Author**: Amar Sharma (M22PH208) | **Date**: November 20, 2025  
-
-**License**: MIT License—free for research, education, and non-commercial use.
-
----
-
-*⭐ Star this repo for more generative AI projects in materials science!*  
-[Colab Notebook](https://colab.research.google.com/drive/... ) | [Dataset Source](link-to-dataset)
