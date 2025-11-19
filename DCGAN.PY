@@ -1,305 +1,379 @@
+CELL 1 ( # FOR DATA LOADING):
+!unzip /content/Voronoi_micro_imgs-20251103T050538Z-1-001.zip -d /content/unzipped_data
+ 
+import h5py
 import os
-import json
 import numpy as np
+ 
+unzipped_dir = '/content/unzipped_data/Voronoi_micro_imgs'
+file_list = [os.path.join(unzipped_dir, f) for f in os.listdir(unzipped_dir) if f.endswith('.h5')]
+ 
+with h5py.File(file_list[0], 'r') as f:
+    keys = list(f.keys())
+    data_shape = f[keys[0]].shape
+    dtype = f[keys[0]].dtype
+ 
+all_data = np.zeros((len(file_list),) + data_shape, dtype=dtype)
+ 
+for i, file_path in enumerate(file_list):
+    with h5py.File(file_path, 'r') as f:
+        all_data[i, ...] = f[keys[0]][:]
+    if (i + 1) % 1000 == 0:
+        print(f'{i+1} files read')
+ 
+print("All data loaded successfully.")
+print(f"Shape of combined data: {all_data.shape}")
+ 
+CELL 2 (# FOR VISUALIZING THE DATASET):
 import matplotlib.pyplot as plt
-import warnings
-import tqdm.notebook as tqdm
-
+import random
+ 
+fig, axs = plt.subplots(3, 3, figsize=(10, 10))
+num_images_to_plot = 9
+indices_to_plot = random.sample(range(all_data.shape[0]), num_images_to_plot)
+ 
+for i, ax in enumerate(axs.flatten()):
+    image_data = all_data[indices_to_plot[i], :, :, 0] # Assuming the image is 64x64 and the channel is the last dim
+ 
+    ax.imshow(image_data, cmap='gray') # Assuming grayscale images
+    ax.set_title(f"Image {indices_to_plot[i]}")
+    ax.axis('off')
+ 
+plt.tight_layout()
+plt.show()
+ 
+CELL 3 (#  TRAINING ):
+!pip install imageio -q
+!pip install tensorflow-docs -q
+ 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.preprocessing.image import load_img,array_to_img
-from tensorflow.keras.models import Model,Sequential
 from tensorflow.keras import layers
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.losses import BinaryCrossentropy
-from tensorflow.keras.callbacks import ModelCheckpoint,EarlyStopping
-
-warnings.filterwarnings("ignore")
-
-# Load Kaggle credentials from Colab secrets
-from google.colab import userdata
-from google.colab.userdata import SecretNotFoundError
-
-try:
-    kaggle_credentials = json.loads(userdata.get('KAGGLE_KEY'))
-    os.environ['KAGGLE_USERNAME'] = kaggle_credentials['username']
-    os.environ['KAGGLE_KEY'] = kaggle_credentials['key']
-    print("Kaggle credentials loaded successfully.")
-except SecretNotFoundError:
-    print("Kaggle API key not found in Colab secrets. Please add it using the instructions provided.")
-    # Exit or handle the error appropriately
-    exit()
-except KeyError as e:
-    print(f"Error accessing Kaggle credential: {e}. Please check your KAGGLE_KEY secret format.")
-    # Exit or handle the error appropriately
-    exit()
-
-# Check if environment variables are set
-if 'KAGGLE_USERNAME' not in os.environ or 'KAGGLE_KEY' not in os.environ:
-    print("Kaggle environment variables are not set. Please ensure your KAGGLE_KEY secret is correctly configured in Colab Secrets and notebook access is enabled.")
-    exit()
-
-
-# Download and unzip the data
-!kaggle datasets download 'soumikrakshit/anime-faces'
-!unzip /content/anime-faces.zip -d /content/
-
-base_dir= "/content/data/data"
-
-# loading image path list
-image_paths=[]
-for image_name in os.listdir(base_dir):
-  image_path=os.path.join(base_dir,image_name)
-  image_paths.append(image_path)
-
-# Reduce the dataset size for faster training (e.g., use only the first 5000 images)
-image_paths = image_paths[:3000]
-
-# load the image and convert to numpy array
-def load_image(path):
-  image = tf.io.read_file(path)
-  image = tf.image.decode_jpeg(image, channels=3)  # Adjust channels if needed
-  image = tf.image.convert_image_dtype(image, dtype=tf.float32)
-  return image
-
-train_dataset = tf.data.Dataset.from_tensor_slices(image_paths)
-train_dataset = train_dataset.map(load_image)  # Apply load_image function to each path
-train_dataset = train_dataset.batch(32)  # Adjust batch size as needed
-
-# Convert to NumPy array
-train_images = []
-for batch in train_dataset:
-    for image in batch:
-        train_images.append(image.numpy())
-
-train_images = np.array(train_images)
-
-# Normalize the pixel values to the range [-1, 1]
-train_images = (train_images - 127.5) / 127.5
-
-# latent dimension for random noise
-latent_dim=100
-
-# weight initialiser
-weight_init=keras.initializers.RandomNormal(mean=0.0,stddev=0.02)
-
-# no of channels
-channels=3
-
-# Generator
-model=Sequential(name="Generator")
-#  1d random noise
-model.add(layers.Dense(8*8*512,use_bias=False,input_dim=latent_dim))
-model.add(layers.BatchNormalization())
-model.add(layers.ReLU())
-
-# convert 1D to 3D
-model.add(layers.Reshape((8,8,512)))
-
-# upsample to 16x16
-model.add(layers.Conv2DTranspose(256,kernel_size=(4,4),strides=(2,2),padding="same",kernel_initializer=weight_init))
-model.add(layers.BatchNormalization())
-model.add(layers.ReLU())
-
-# upsample to 32x32
-model.add(layers.Conv2DTranspose(128,kernel_size=(4,4),strides=(2,2),padding="same",kernel_initializer=weight_init))
-model.add(layers.BatchNormalization())
-model.add(layers.ReLU())
-
-# upsample to 64x64
-model.add(layers.Conv2DTranspose(64,kernel_size=(4,4),strides=(2,2),padding="same",kernel_initializer=weight_init))
-model.add(layers.BatchNormalization())
-model.add(layers.ReLU())
-
-model.add(layers.Conv2D(channels,kernel_size=(4,4),padding="same",activation="tanh"))
-
-generator=model
-
-# Discriminator model
-model=Sequential(name="Discriminator")
-input_shape=(64,64,3)
-alpha=0.2
-
-# create conv layers
-model.add(layers.Conv2D(64,kernel_size=(4,4),strides=(2,2),padding="same",input_shape=input_shape))
-model.add(layers.BatchNormalization())
-model.add(layers.LeakyReLU(alpha=alpha))
-
-model.add(layers.Conv2D(128,kernel_size=(4,4),strides=(2,2),padding="same",input_shape=input_shape))
-model.add(layers.BatchNormalization())
-model.add(layers.LeakyReLU(alpha=alpha))
-
-model.add(layers.Conv2D(128,kernel_size=(4,4),strides=(2,2),padding="same",input_shape=input_shape))
-model.add(layers.BatchNormalization())
-model.add(layers.LeakyReLU(alpha=alpha))
-
-model.add(layers.Flatten())
-model.add(layers.Dropout(0.3))
-
-# output class
-model.add(layers.Dense(1,activation="sigmoid"))
-
-discriminator=model
-
-# Create DCGAN
-class DCGAN(keras.Model):
-  def __init__(self,discriminator,generator,latent_dim):
-    super().__init__()
-    self.discriminator=discriminator
-    self.generator=generator
-    self.latent_dim=latent_dim
-    self.g_loss_metric=keras.metrics.Mean(name="g_loss")
-    self.d_loss_metric=keras.metrics.Mean(name="d_loss")
-
-  @property
-  def metrics(self):
-    return [self.g_loss_metric,self.d_loss_metric]
-
-  def compile(self,d_optimizer,g_optimizer,loss_fn):
-    super().compile()
-    self.d_optimizer=d_optimizer
-    self.g_optimizer=g_optimizer
-    self.loss_fn=loss_fn
-
-  def build(self, input_shape):
-      # Build the generator with a dummy input
-      self.generator.build((input_shape[0], self.latent_dim))
-      # Build the discriminator with a dummy input
-      self.discriminator.build(input_shape)
-      super().build(input_shape)
-
-
-  def train_step(self,real_images):
-    # get batchsize from the data
-    batch_size=tf.shape(real_images)[0]
-
-    # create random noise
-    random_noise=tf.random.normal(shape=(batch_size,self.latent_dim))
-
-    # train the discriminator with real(1) and fake(0) images
-    with tf.GradientTape() as tape:
-      # compute loss on real images
-      pred_real=self.discriminator(real_images,training=True)
-      # generate real image labels
-      real_labels=tf.ones((batch_size,1))
-      # one sided label smoothing
-      real_labels+=0.05*tf.random.uniform(tf.shape(real_labels)) # will generate values between [0-1] with shape of real labels
-      # we multiply by 0.05 to apply label smoothing
-
-      # compute loss
-      d_loss_real=self.loss_fn(real_labels,pred_real)
-
-      # compute loss on fake images
-      fake_images=self.generator(random_noise)
-      pred_fake=self.discriminator(fake_images,training=True)
-
-      # generate fake image labels
-      fake_labels=tf.zeros((batch_size,1))
-
-      # compute loss
-      d_loss_fake=self.loss_fn(fake_labels,pred_fake)
-
-      # total discriminator loss
-      d_loss=(d_loss_real+d_loss_fake)/2
-
-    # compute discriminator gradients
-    gradients=tape.gradient(d_loss,self.discriminator.trainable_variables)
-    # update the gradients
-    self.d_optimizer.apply_gradients(zip(gradients,self.discriminator.trainable_variables))
-
-    # train the  GENERATOR model
-
-    labels=tf.ones((batch_size,1))
-    # generator wants discriminator to think fake images as real
-    with tf.GradientTape() as tape:
-      # generate fake images from generator
-      fake_images=self.generator(random_noise,training=True)
-      # classify images as real or fake
-      pred_fake=self.discriminator(fake_images,training=True)
-      # compute loss
-      g_loss=self.loss_fn(labels,pred_fake)
-
-    # compute gradients
-    gradients=tape.gradient(g_loss,self.generator.trainable_variables)
-    # update the gradients
-    self.g_optimizer.apply_gradients(zip(gradients,self.generator.trainable_variables))
-
-    # update states for both models
-    self.g_loss_metric.update_state(g_loss)
-    self.d_loss_metric.update_state(d_loss)
-
-    return {"g_loss":self.g_loss_metric.result(),"d_loss":self.d_loss_metric.result()}
-
-class DCGANMonitor(keras.callbacks.Callback):
-  def __init__(self,num_img=20,latent_dim=100):
-    self.num_img=num_img
-    self.latent_dim=latent_dim
-
-    # create random noise for generating images
-    self.noise=tf.random.normal(shape=(self.num_img,self.latent_dim))
-
-  def on_epoch_end(self,epoch,logs=None):
-    # generating image from noise
-    generated_images=self.model.generator(self.noise)
-    # denoising the image
-    generated_images= (generated_images*127.5)+127.5
-    # generated_images=array_to_img(generated_images)
-
-    # plot the generated images
-    fig=plt.figure(figsize=(8,8))
-    for i in range(self.num_img):
-      plt.subplot(5,5,i+1)
-      img= array_to_img(generated_images[i])
-      plt.imshow(img)
-      plt.axis("off")
-
-    # plt.savefig('epoch_{:03d}.png'.format(epoch))
-    plt.show()
-
-    def on_train_end(self,logs=None):
-      self.model.generator.save("generator.h5")
-
-dcgan=DCGAN(discriminator=discriminator,generator=generator,latent_dim=latent_dim)
-
-D_LR=0.001
-G_LR=0.003
-dcgan.compile(g_optimizer=Adam(learning_rate=G_LR,beta_1=0.5),d_optimizer=Adam(learning_rate=D_LR,beta_1=0.5),loss_fn=BinaryCrossentropy())
-
-# Define the checkpoint filepath
-checkpoint_filepath = "model_checkpoint.weights.h5"
-
-# Create a ModelCheckpoint callback
-checkpoint_callback = ModelCheckpoint(
-    filepath=checkpoint_filepath,  # Path to save the checkpoint
-    save_weights_only=True,  # Save only the weights, not the entire model
-    save_best_only=False,  # Save weights every epoch, not just the best ones
-    save_freq='epoch'  # Frequency of saving: at the end of every epoch
-)
-
-# Load weights if checkpoint exists
-if os.path.exists(checkpoint_filepath):  # Check if the checkpoint file exists
-    dcgan.load_weights(checkpoint_filepath)  # Load weights into the model
-    print("Resuming training from checkpoint...")
+import numpy as np
+import os
+import h5py
+import PIL.Image
+import imageio.v2 as imageio      # Use v2 to avoid deprecation warnings
+import glob
+import matplotlib.pyplot as plt
+from IPython.display import display
+import tensorflow_docs.vis.embed as embed
+ 
+# --- 1. SETUP & CONFIGURATION ---
+ 
+# --- A. ENABLE AUTOMATIC MIXED PRECISION (AMP) ---
+print("Enabling Mixed Precision (AMP)...")
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
+ 
+# --- B. CONFIGURATION ---
+config = {
+    "epochs": 100,
+    "batch_size": 64,
+ 
+    # --- SOTA FIX (TTUR + Decay): Different LRs for G and D ---
+    "g_learning_rate": 0.0001, # Generator Initial LR
+    "d_learning_rate": 0.0004, # Critic Initial LR (4x faster)
+    # --------------------------------------------------------
+   
+    "beta_1": 0.5,
+    "beta_2": 0.9,
+    "z_noise_dim": 100,
+    "image_size": 64,
+    "channels": 1,
+    "checkpoint_interval": 10,
+    "model_type": "WGAN",
+   
+    # (TTUR + Decay): (n_critic is 1)
+    "n_critic": 1,
+    "gp_weight": 10.0
+}
+ 
+# --- C. LOCAL DIRECTORIES ---
+GIF_FRAME_DIR = './gif_frames'
+os.makedirs(GIF_FRAME_DIR, exist_ok=True)
+ 
+ 
+# --- 2. DATA PREPARATION ---
+print("Unzipping and loading data...")
+# --- NOTE: Ensure the zip file is uploaded to the Colab root directory ---
+!unzip -o /content/Voronoi_micro_imgs-20251103T050538Z-1-001.zip -d /content/unzipped_data
+ 
+print("Loading and reshaping H5 files...")
+unzipped_dir = '/content/unzipped_data/Voronoi_micro_imgs'
+file_list = [os.path.join(unzipped_dir, f) for f in os.listdir(unzipped_dir) if f.endswith('.h5')]
+ 
+all_data_list = []
+data_key = None
+for file_path in file_list:
+    with h5py.File(file_path, 'r') as f:
+        if data_key is None:
+            data_key = list(f.keys())[0]
+       
+all_data_list.append(f[data_key][:])
+ 
+stacked_data = np.stack(all_data_list, axis=0)
+print(f"Initial stacked shape: {stacked_data.shape}")
+ 
+x_train = np.transpose(stacked_data, (0, 3, 1, 2))
+x_train = x_train.reshape(-1, 64, 64)
+x_train = np.expand_dims(x_train, axis=-1)
+ 
+print(f"Final COMBINED data shape (N, H, W, C): {x_train.shape}")
+ 
+print("\n--- Data Range Check ---")
+print(f"Data type: {x_train.dtype}")
+print(f"Min value in data: {np.min(x_train)}")
+print(f"Max value in data: {np.max(x_train)}")
+print("--------------------------\n")
+ 
+if np.max(x_train) <= 1.0:
+    print("Normalizing for [0, 1] range.")
+    x_train_normalized = (x_train.astype('float32') - 0.5) / 0.5
 else:
-    print("Starting training from scratch...")
-
-# Before training (to resume):
-if os.path.exists('train_history.json'):
-    with open('train_history.json', 'r') as f:
-        history = json.load(f)
-
-    # Plotting the loss curves
-    plt.figure(figsize=(10, 5))
-    plt.plot(history['g_loss'], label='Generator Loss')
-    plt.plot(history['d_loss'], label='Discriminator Loss')
-    plt.title('Loss Curves')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.show()
-
-# Build the model explicitly before training or loading weights
-dcgan.build(input_shape=(None, 64, 64, 3))
-
-N_EPOCHS=50
-history = dcgan.fit(train_images,batch_size=32,epochs=N_EPOCHS,callbacks=[DCGANMonitor(latent_dim=latent_dim),checkpoint_callback]).history
+    print("Normalizing for [0, 255] range.")
+    x_train_normalized = (x_train.astype('float32') - 127.5) / 127.5
+ 
+train_dataset = tf.data.Dataset.from_tensor_slices(x_train_normalized).shuffle(x_train.shape[0]).batch(config['batch_size'], drop_remainder=True)
+ 
+# --- 3. MODEL ARCHITECTURE (STABLE) ---
+# Using UpSampling2D + Conv2D and NO BatchNormalization in Generator
+def build_generator():
+    noise_input = layers.Input(shape=(config['z_noise_dim'],))
+    x = layers.Dense(4 * 4 * 512)(noise_input)
+    x = layers.Reshape((4, 4, 512))(x)
+ 
+    # 8x8
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(256, kernel_size=3, strides=1, padding='same')(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    # 16x16
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(128, kernel_size=3, strides=1, padding='same')(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    # 32x32
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(64, kernel_size=3, strides=1, padding='same')(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+   
+    # 64x64
+    x = layers.UpSampling2D()(x)
+    output_image = layers.Conv2D(config['channels'], kernel_size=3, strides=1, padding='same')(x)
+   
+    output_image = layers.Activation('tanh', dtype='float32')(output_image)
+ 
+    return keras.Model(noise_input, output_image)
+ 
+def build_critic():
+    image_input = layers.Input(shape=(config['image_size'], config['image_size'], config['channels']))
+ 
+    x = layers.Conv2D(64, kernel_size=4, strides=2, padding='same')(image_input) # 32x32
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    x = layers.Conv2D(128, kernel_size=4, strides=2, padding='same')(x) # 16x16
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    x = layers.Conv2D(256, kernel_size=4, strides=2, padding='same')(x) # 8x8
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    x = layers.Conv2D(512, kernel_size=4, strides=2, padding='same')(x) # 4x4
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
+ 
+    x = layers.Flatten()(x)
+    output = layers.Dense(1)(x)
+    output = layers.Activation('linear', dtype='float32')(output)
+ 
+    return keras.Model(image_input, output)
+ 
+# --- 4. MODEL & OPTIMIZER SETUP (TTUR + Decay) ---
+print("Setting up optimizers with TTUR + CosineDecay Schedulers...")
+ 
+# ---Create two decaying LR schedules ---
+try:
+    steps_per_epoch = x_train.shape[0] // config['batch_size']
+    total_steps = steps_per_epoch * config['epochs']
+    print(f"Total training steps for LR schedule: {total_steps}")
+except Exception as e:
+    total_steps = 31200 # Fallback (20000 / 64 * 100)
+    print(f"Warning: Could not calculate steps. Defaulting to {total_steps} steps.")
+ 
+g_lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
+    initial_learning_rate=config['g_learning_rate'],
+    decay_steps=total_steps,
+    alpha=0.0
+)
+ 
+d_lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
+    initial_learning_rate=config['d_learning_rate'],
+    decay_steps=total_steps,
+    alpha=0.0
+)
+# ----------------------------------------------------
+ 
+critic = build_critic()
+generator = build_generator()
+ 
+# --- Both optimizers use their *own* decaying schedule ---
+g_optimizer_base = tf.keras.optimizers.Adam(learning_rate=g_lr_schedule, beta_1=config['beta_1'], beta_2=config['beta_2'])
+d_optimizer_base = tf.keras.optimizers.Adam(learning_rate=d_lr_schedule, beta_1=config['beta_1'], beta_2=config['beta_2'])
+# ----------------------------------------------------------------------
+ 
+g_optimizer = tf.keras.mixed_precision.LossScaleOptimizer(g_optimizer_base)
+d_optimizer = tf.keras.mixed_precision.LossScaleOptimizer(d_optimizer_base)
+ 
+# --- 5. CHECKPOINTING & RESUME SETUP ---
+start_epoch = tf.Variable(0, dtype=tf.int64)
+checkpoint_dir = './checkpoints'
+os.makedirs(checkpoint_dir, exist_ok=True)
+checkpoint_prefix = os.path.join(checkpoint_dir, "model_checkpoint")
+ 
+ckpt = tf.train.Checkpoint(generator=generator,
+                           critic=critic,
+                           g_optimizer=g_optimizer_base,
+                           d_optimizer=d_optimizer_base,
+                           epoch=start_epoch)
+ 
+# --- Check for local checkpoint ---
+latest_ckpt = tf.train.latest_checkpoint(checkpoint_dir)
+if latest_ckpt:
+    try:
+        ckpt.restore(latest_ckpt)
+        print(f"Local checkpoint restored from epoch {start_epoch.numpy()}")
+    except Exception as e:
+        print(f"Could not restore checkpoint. Starting from scratch. Error: {e}")
+else:
+    print("No local checkpoint found. Starting from scratch.")
+ 
+ 
+# --- 6. LOSS FUNCTIONS & TRAINING STEPS ---
+def critic_loss_wgan(real_output, fake_output):
+    return tf.reduce_mean(fake_output) - tf.reduce_mean(real_output)
+ 
+def generator_loss_wgan(fake_output):
+    return -tf.reduce_mean(fake_output)
+ 
+def gradient_penalty(real_images, fake_images):
+    current_batch_size = tf.shape(real_images)[0]
+    alpha = tf.random.uniform([current_batch_size, 1, 1, 1], 0.0, 1.0)
+    alpha = tf.cast(alpha, real_images.dtype)
+    interpolated = real_images + alpha * (fake_images - real_images)
+ 
+    with tf.GradientTape() as gp_tape:
+        gp_tape.watch(interpolated)
+        pred = critic(interpolated, training=True)
+ 
+    grads = gp_tape.gradient(pred, [interpolated])[0]
+    norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+    gp = tf.reduce_mean((norm - 1.0) ** 2)
+    return gp
+ 
+@tf.function
+def train_step_wgan(images):
+    current_batch_size = tf.shape(images)[0]
+    noise = tf.random.normal([current_batch_size, config['z_noise_dim']])
+ 
+    # --- Train Critic ---
+    # The loop will run once as config['n_critic'] = 1
+    for _ in range(config['n_critic']):
+        with tf.GradientTape() as tape:
+            fake_images = generator(noise, training=True)
+            real_output = critic(images, training=True)
+            fake_output = critic(fake_images, training=True)
+            c_loss = critic_loss_wgan(real_output, fake_output)
+            gp = gradient_penalty(images, fake_images)
+           
+            total_critic_loss = c_loss + config['gp_weight'] * gp
+ 
+        c_grads = tape.gradient(total_critic_loss, critic.trainable_variables)
+        d_optimizer.apply_gradients(zip(c_grads, critic.trainable_variables))
+ 
+    # --- Train Generator ---
+    with tf.GradientTape() as tape:
+        fake_images = generator(noise, training=True)
+        fake_output = critic(fake_images, training=True)
+        gen_loss = generator_loss_wgan(fake_output)
+ 
+    g_grads = tape.gradient(gen_loss, generator.trainable_variables)
+    g_optimizer.apply_gradients(zip(g_grads, generator.trainable_variables))
+ 
+    return gen_loss, total_critic_loss
+ 
+# --- 7. HELPER FUNCTIONS FOR VISUALIZATION ---
+ 
+# --- HELPER FOR GIF (16 IMAGES) ---
+num_examples_to_generate = 16
+seed = tf.random.normal([num_examples_to_generate, config['z_noise_dim']])
+ 
+def generate_and_save_images(model, epoch, test_input):
+    predictions = model(test_input, training=False)
+    predictions_denorm = (predictions * 127.5 + 127.5).numpy().astype(np.uint8)
+ 
+    fig = plt.figure(figsize=(8, 8))
+    for i in range(predictions.shape[0]):
+        plt.subplot(4, 4, i + 1)
+        plt.imshow(predictions_denorm[i, :, :, 0], cmap='gray')
+        plt.axis('off')
+ 
+    frame_filepath = os.path.join(GIF_FRAME_DIR, f'image_at_epoch_{epoch:04d}.png')
+    plt.savefig(frame_filepath)
+    plt.close(fig)
+    # Removed wandb.log()
+ 
+# --- 8. TRAINING LOOP ---
+print(f"Starting/Resuming training from epoch {start_epoch.numpy()}")
+ 
+for epoch in range(start_epoch.numpy(), config['epochs']):
+    start_epoch.assign_add(1)
+   
+    g_loss_epoch = 0.0
+    d_loss_epoch = 0.0
+    num_batches = 0
+ 
+    for image_batch in train_dataset:
+        g_loss, d_loss = train_step_wgan(image_batch)
+        g_loss_epoch += g_loss.numpy()
+        d_loss_epoch += d_loss.numpy()
+        num_batches += 1
+ 
+    # --- Log both decaying learning rates ---
+    current_g_lr = g_lr_schedule(g_optimizer_base.iterations).numpy()
+    current_d_lr = d_lr_schedule(d_optimizer_base.iterations).numpy()
+ 
+    # Checkpoint and save GIF frame
+    if (epoch + 1) % config['checkpoint_interval'] == 0:
+        ckpt.save(file_prefix=checkpoint_prefix)
+ 
+        avg_g_loss = g_loss_epoch / num_batches
+        avg_d_loss = d_loss_epoch / num_batches
+ 
+        print(f'\nEpoch {epoch + 1}, G Loss={avg_g_loss}, D Loss={avg_d_loss}')
+        print(f'Current G_LR: {current_g_lr} | Current D_LR: {current_d_lr}')
+        print(f"Checkpoint saved locally for epoch {epoch+1}")
+ 
+        generate_and_save_images(generator, epoch + 1, seed)
+        print(f"Saved GIF frame for epoch {epoch + 1}")
+ 
+# --- FINAL GENERATION ---
+generate_and_save_images(generator, config['epochs'], seed)
+ 
+print("Training finished.")
+ 
+# --- 9. CREATE AND DISPLAY THE GIF ---
+print("\nCreating training GIF...")
+anim_file = 'voronoi_training_animation.gif'
+ 
+with imageio.get_writer(anim_file, mode='I') as writer:
+    filenames = sorted(glob.glob(os.path.join(GIF_FRAME_DIR, 'image*.png')))
+    print(f"Found {len(filenames)} frames for GIF.")
+    for filename in filenames:
+        image = imageio.imread(filename)
+        writer.append_data(image)
+    if filenames:
+        image = imageio.imread(filenames[-1]) # Add last frame again for pause
+        writer.append_data(image)
+ 
+print(f"GIF saved to {anim_file}")
+ 
+# Embed the GIF in the Colab notebook
+display(embed.embed_file(anim_file))
